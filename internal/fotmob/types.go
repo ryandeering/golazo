@@ -157,9 +157,24 @@ func (m fotmobMatchDetails) toAPIMatchDetails() *api.MatchDetails {
 			event.EventType = &e.EventType
 		}
 
-		// Set team (simplified - would need team lookup in real implementation)
-		event.Team = api.Team{
-			ID: e.TeamID,
+		// Set team based on teamId - match with home or away team
+		if e.TeamID == m.Home.ID {
+			event.Team = api.Team{
+				ID:        m.Home.ID,
+				Name:      m.Home.Name,
+				ShortName: m.Home.ShortName,
+			}
+		} else if e.TeamID == m.Away.ID {
+			event.Team = api.Team{
+				ID:        m.Away.ID,
+				Name:      m.Away.Name,
+				ShortName: m.Away.ShortName,
+			}
+		} else {
+			// Fallback if team ID doesn't match
+			event.Team = api.Team{
+				ID: e.TeamID,
+			}
 		}
 
 		details.Events = append(details.Events, event)
