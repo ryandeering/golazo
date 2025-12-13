@@ -2,10 +2,12 @@
 package app
 
 import (
+	"context"
 	"time"
 
 	"github.com/0xjuanma/golazo/internal/api"
 	"github.com/0xjuanma/golazo/internal/data"
+	"github.com/0xjuanma/golazo/internal/fotmob"
 	"github.com/0xjuanma/golazo/internal/ui"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,7 +30,10 @@ type model struct {
 	liveUpdates  []string
 	spinner      spinner.Model
 	loading      bool
-	updateGen    *data.LiveUpdateGenerator
+	fotmobClient *fotmob.Client
+	parser       *fotmob.LiveUpdateParser
+	lastEvents   []api.MatchEvent
+	polling      bool
 }
 
 // NewModel creates a new application model with default values.
@@ -38,10 +43,13 @@ func NewModel() model {
 	s.Style = ui.SpinnerStyle()
 
 	return model{
-		currentView: viewMain,
-		selected:    0,
-		spinner:     s,
-		liveUpdates: []string{},
+		currentView:  viewMain,
+		selected:     0,
+		spinner:      s,
+		liveUpdates:  []string{},
+		fotmobClient: fotmob.NewClient(),
+		parser:       fotmob.NewLiveUpdateParser(),
+		lastEvents:   []api.MatchEvent{},
 	}
 }
 
@@ -65,13 +73,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case liveUpdateMsg:
-		if m.loading {
+		if msg.update != "" {
 			m.liveUpdates = append(m.liveUpdates, msg.update)
-			// Continue fetching updates
-			if m.updateGen != nil && m.updateGen.HasMore() {
-				cmds = append(cmds, fetchLiveUpdate(m.updateGen))
+		}
+		// Continue polling if match is live
+		if m.polling && m.matchDetails != nil && m.matchDetails.Status == api.MatchStatusLive {
+			cmds = append(cmds, pollMatchDetails(m.fotmobClient, m.parser, m.matchDetails.ID, m.lastEvents))
+		} else {
+			m.loading = false
+			m.polling = false
+		}
+		return m, tea.Batch(cmds...)
+	case matchDetailsMsg:
+		if msg.details != nil {
+			// Detect new events
+			newEvents := m.parser.GetNewEvents(m.lastEvents, msg.details.Events)
+			if len(newEvents) > 0 {
+				// Parse new events into updates
+				updates := m.parser.ParseEvents(newEvents, msg.details.HomeTeam, msg.details.AwayTeam)
+				m.liveUpdates = append(m.liveUpdates, updates...)
+			}
+			m.matchDetails = msg.details
+			m.lastEvents = msg.details.Events
+
+			// Continue polling if match is live
+			if msg.details.Status == api.MatchStatusLive {
+				m.polling = true
+				m.loading = true
+				cmds = append(cmds, pollMatchDetails(m.fotmobClient, m.parser, msg.details.ID, m.lastEvents))
 			} else {
 				m.loading = false
+				m.polling = false
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -85,7 +117,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected = 0
 				m.matchDetails = nil
 				m.liveUpdates = []string{}
+				m.lastEvents = []api.MatchEvent{}
 				m.loading = false
+				m.polling = false
 				return m, nil
 			}
 		}
@@ -97,6 +131,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewLiveMatches:
 			return m.handleLiveMatchesKeys(msg)
 		}
+	case liveMatchesMsg:
+		// Convert to display format
+		displayMatches := make([]ui.MatchDisplay, 0, len(msg.matches))
+		for _, match := range msg.matches {
+			displayMatches = append(displayMatches, ui.MatchDisplay{
+				Match: match,
+			})
+		}
+
+		m.matches = displayMatches
+		m.selected = 0
+		m.loading = false
+
+		// Load details for first match if available
+		if len(m.matches) > 0 {
+			return m.loadMatchDetails(m.matches[0].ID)
+		}
+
+		return m, nil
 	}
 	return m, nil
 }
@@ -118,34 +171,10 @@ func (m model) handleMainViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Stats - do nothing, stay on main view
 			return m, nil
 		} else if m.selected == 1 {
-			// Live Matches - load matches and switch to live matches view
-			matches, err := data.MockMatches()
-			if err != nil {
-				// If loading fails, switch view with empty matches
-				// Error is silently ignored for now - could be logged in future
-				m.currentView = viewLiveMatches
-				m.matches = []ui.MatchDisplay{}
-				return m, nil
-			}
-
-			// Convert to display format
-			displayMatches := make([]ui.MatchDisplay, 0, len(matches))
-			for _, match := range matches {
-				displayMatches = append(displayMatches, ui.MatchDisplay{
-					Match: match,
-				})
-			}
-
-			m.matches = displayMatches
+			// Live Matches - fetch live matches from API
 			m.currentView = viewLiveMatches
-			m.selected = 0
-
-			// Load details for first match if available
-			if len(m.matches) > 0 {
-				return m.loadMatchDetails(m.matches[0].ID)
-			}
-
-			return m, nil
+			m.loading = true
+			return m, fetchLiveMatches(m.fotmobClient)
 		}
 		return m, nil
 	}
@@ -178,15 +207,10 @@ func (m model) handleLiveMatchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // loadMatchDetails loads match details and starts live updates.
 func (m model) loadMatchDetails(matchID int) (tea.Model, tea.Cmd) {
-	if details, err := data.MockMatchDetails(matchID); err == nil {
-		m.matchDetails = details
-		// Start live updates for selected match
-		m.updateGen = data.NewLiveUpdateGenerator(matchID)
-		m.liveUpdates = []string{}
-		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, fetchLiveUpdate(m.updateGen))
-	}
-	return m, nil
+	m.liveUpdates = []string{}
+	m.lastEvents = []api.MatchEvent{}
+	m.loading = true
+	return m, tea.Batch(m.spinner.Tick, fetchMatchDetails(m.fotmobClient, matchID))
 }
 
 func (m model) View() string {
@@ -205,12 +229,60 @@ type liveUpdateMsg struct {
 	update string
 }
 
-// fetchLiveUpdate simulates fetching a live update.
-func fetchLiveUpdate(gen *data.LiveUpdateGenerator) tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-		if update, ok := gen.GetNextUpdate(); ok {
-			return liveUpdateMsg{update: update}
+// matchDetailsMsg is a message containing match details.
+type matchDetailsMsg struct {
+	details *api.MatchDetails
+}
+
+// fetchLiveMatches fetches live matches from the API.
+func fetchLiveMatches(client *fotmob.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		matches, err := client.LiveMatches(ctx)
+		if err != nil {
+			// Fallback to mock data on error
+			matches, _ = data.MockMatches()
 		}
-		return liveUpdateMsg{update: ""}
+
+		return liveMatchesMsg{matches: matches}
+	}
+}
+
+// liveMatchesMsg is a message containing live matches.
+type liveMatchesMsg struct {
+	matches []api.Match
+}
+
+// fetchMatchDetails fetches match details from the API.
+func fetchMatchDetails(client *fotmob.Client, matchID int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		details, err := client.MatchDetails(ctx, matchID)
+		if err != nil {
+			// Fallback to mock data on error
+			details, _ = data.MockMatchDetails(matchID)
+		}
+
+		return matchDetailsMsg{details: details}
+	}
+}
+
+// pollMatchDetails polls match details every 60 seconds for live updates.
+func pollMatchDetails(client *fotmob.Client, parser *fotmob.LiveUpdateParser, matchID int, lastEvents []api.MatchEvent) tea.Cmd {
+	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		details, err := client.MatchDetails(ctx, matchID)
+		if err != nil {
+			return matchDetailsMsg{details: nil}
+		}
+
+		// Return match details - new events will be detected in the Update handler
+		return matchDetailsMsg{details: details}
 	})
 }
