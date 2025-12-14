@@ -429,7 +429,7 @@ type matchDetailsMsg struct {
 }
 
 // fetchLiveMatches fetches live matches from the API.
-// For testing, falls back to mock data if client is nil or on error.
+// Falls back to mock data if client is nil, on error, or if no live matches are available.
 func fetchLiveMatches(client *fotmob.Client) tea.Cmd {
 	return func() tea.Msg {
 		// Use mock data for testing if client is not available
@@ -442,8 +442,8 @@ func fetchLiveMatches(client *fotmob.Client) tea.Cmd {
 		defer cancel()
 
 		matches, err := client.LiveMatches(ctx)
-		if err != nil {
-			// Fallback to mock data on error for testing
+		if err != nil || len(matches) == 0 {
+			// Fallback to mock data on error or if no live matches available
 			matches = data.MockLiveMatches()
 		}
 
