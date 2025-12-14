@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/0xjuanma/golazo/internal/api"
@@ -54,72 +55,90 @@ func NewClient() *Client {
 
 // MatchesByDate retrieves all matches for a specific date.
 // Since the /api/matches endpoint returns 404, we query the supported leagues
-// and aggregate their fixtures for the given date.
+// concurrently (with rate limiting) and aggregate their fixtures for the given date.
 func (c *Client) MatchesByDate(ctx context.Context, date time.Time) ([]api.Match, error) {
 	dateStr := date.Format("2006-01-02")
+	
+	// Use a mutex to protect the shared slice
+	var mu sync.Mutex
 	allMatches := make([]api.Match, 0)
-
-	// Query each supported league and aggregate matches
-	for _, leagueID := range SupportedLeagues {
-		// Apply rate limiting between league queries
-		c.rateLimiter.Wait()
-
-		url := fmt.Sprintf("%s/leagues?id=%d&tab=fixtures", c.baseURL, leagueID)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			continue // Skip this league on error
-		}
-
-		req.Header.Set("User-Agent", "Mozilla/5.0")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			continue // Skip this league on error
-		}
-
-		var leagueResponse struct {
-			Details struct {
-				ID          int    `json:"id"`
-				Name        string `json:"name"`
-				Country     string `json:"country"`
-				CountryCode string `json:"countryCode,omitempty"`
-			} `json:"details"`
-			Fixtures struct {
-				AllMatches []fotmobMatch `json:"allMatches"`
-			} `json:"fixtures"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&leagueResponse); err != nil {
-			resp.Body.Close()
-			continue // Skip this league on parse error
-		}
-		resp.Body.Close()
-
-		// Filter matches for the requested date and add league info
-		for _, m := range leagueResponse.Fixtures.AllMatches {
-			// Check if match is on the requested date
-			if m.Status.UTCTime != "" {
-				matchTime, err := time.Parse(time.RFC3339, m.Status.UTCTime)
-				if err == nil {
-					matchDateStr := matchTime.Format("2006-01-02")
-					if matchDateStr == dateStr {
-						// Set league info from the response details
-						if m.League.ID == 0 {
-							m.League = league{
-								ID:          leagueResponse.Details.ID,
-								Name:        leagueResponse.Details.Name,
-								Country:     leagueResponse.Details.Country,
-								CountryCode: leagueResponse.Details.CountryCode,
+	
+	// Query leagues concurrently with rate limiting
+	var wg sync.WaitGroup
+	for i, leagueID := range SupportedLeagues {
+		wg.Add(1)
+		go func(id int, index int) {
+			defer wg.Done()
+			
+			// Stagger requests slightly to respect rate limits
+			if index > 0 {
+				time.Sleep(time.Duration(index) * 500 * time.Millisecond)
+			}
+			c.rateLimiter.Wait()
+			
+			url := fmt.Sprintf("%s/leagues?id=%d&tab=fixtures", c.baseURL, id)
+			
+			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if err != nil {
+				return // Skip this league on error
+			}
+			
+			req.Header.Set("User-Agent", "Mozilla/5.0")
+			
+			resp, err := c.httpClient.Do(req)
+			if err != nil {
+				return // Skip this league on request error
+			}
+			defer resp.Body.Close()
+			
+			var leagueResponse struct {
+				Details struct {
+					ID          int    `json:"id"`
+					Name        string `json:"name"`
+					Country     string `json:"country"`
+					CountryCode string `json:"countryCode,omitempty"`
+				} `json:"details"`
+				Fixtures struct {
+					AllMatches []fotmobMatch `json:"allMatches"`
+				} `json:"fixtures"`
+			}
+			
+			if err := json.NewDecoder(resp.Body).Decode(&leagueResponse); err != nil {
+				return // Skip this league on parse error
+			}
+			
+			// Filter matches for the requested date and add league info
+			leagueMatches := make([]api.Match, 0)
+			for _, m := range leagueResponse.Fixtures.AllMatches {
+				// Check if match is on the requested date
+				if m.Status.UTCTime != "" {
+					matchTime, err := time.Parse(time.RFC3339, m.Status.UTCTime)
+					if err == nil {
+						matchDateStr := matchTime.Format("2006-01-02")
+						if matchDateStr == dateStr {
+							// Set league info from the response details
+							if m.League.ID == 0 {
+								m.League = league{
+									ID:          leagueResponse.Details.ID,
+									Name:        leagueResponse.Details.Name,
+									Country:     leagueResponse.Details.Country,
+									CountryCode: leagueResponse.Details.CountryCode,
+								}
 							}
+							leagueMatches = append(leagueMatches, m.toAPIMatch())
 						}
-						allMatches = append(allMatches, m.toAPIMatch())
 					}
 				}
 			}
-		}
+			
+			// Append to shared slice with mutex protection
+			mu.Lock()
+			allMatches = append(allMatches, leagueMatches...)
+			mu.Unlock()
+		}(leagueID, i)
 	}
-
+	
+	wg.Wait()
 	return allMatches, nil
 }
 
