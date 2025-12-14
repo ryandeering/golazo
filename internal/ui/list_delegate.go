@@ -13,17 +13,17 @@ func NewMatchListDelegate() list.DefaultDelegate {
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
 		Foreground(highlightColor).
 		Bold(true).
-		Padding(0, 2)
+		Padding(0, 1)
 	d.Styles.SelectedDesc = d.Styles.SelectedDesc.
 		Foreground(highlightColor).
-		Padding(0, 2)
+		Padding(0, 1)
 
 	d.Styles.NormalTitle = d.Styles.NormalTitle.
 		Foreground(textColor).
-		Padding(0, 2)
+		Padding(0, 1)
 	d.Styles.NormalDesc = d.Styles.NormalDesc.
 		Foreground(dimColor).
-		Padding(0, 2)
+		Padding(0, 1)
 
 	return d
 }
