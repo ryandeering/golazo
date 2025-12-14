@@ -147,7 +147,7 @@ func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam 
 		if event.Assist != nil && *event.Assist != "" {
 			assistText = fmt.Sprintf(" (assist: %s)", *event.Assist)
 		}
-		return fmt.Sprintf("%d' ⚽ Goal! %s%s - %s", event.Minute, player, assistText, teamName)
+		return fmt.Sprintf("%d' Goal: %s%s - %s", event.Minute, player, assistText, teamName)
 
 	case "card":
 		player := "Unknown"
@@ -158,11 +158,7 @@ func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam 
 		if event.EventType != nil {
 			cardType = *event.EventType
 		}
-		emoji := "🟨"
-		if cardType == "red" {
-			emoji = "🟥"
-		}
-		return fmt.Sprintf("%d' %s %s - %s (%s card)", event.Minute, emoji, player, teamName, cardType)
+		return fmt.Sprintf("%d' Card (%s): %s - %s", event.Minute, cardType, player, teamName)
 
 	case "substitution":
 		player := "Unknown"
