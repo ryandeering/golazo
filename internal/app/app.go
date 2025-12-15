@@ -40,6 +40,7 @@ type model struct {
 	useMockData        bool
 	fotmobClient       *fotmob.Client
 	footballDataClient *footballdata.Client
+	apiKeyMissing      bool // Track if API key is missing
 	parser             *fotmob.LiveUpdateParser
 	lastEvents         []api.MatchEvent
 	polling            bool
@@ -61,8 +62,11 @@ func NewModel(useMockData bool) model {
 
 	// Initialize API-Sports.io client if API key is available
 	var footballDataClient *footballdata.Client
+	apiKeyMissing := false
 	if apiKey, err := data.FootballDataAPIKey(); err == nil {
 		footballDataClient = footballdata.NewClient(apiKey)
+	} else {
+		apiKeyMissing = true
 	}
 
 	// Initialize list models with custom delegate
@@ -87,6 +91,7 @@ func NewModel(useMockData bool) model {
 		useMockData:        useMockData,
 		fotmobClient:       fotmob.NewClient(),
 		footballDataClient: footballDataClient,
+		apiKeyMissing:      apiKeyMissing,
 		parser:             fotmob.NewLiveUpdateParser(),
 		lastEvents:         []api.MatchEvent{},
 		liveMatchesList:    liveList,
@@ -573,7 +578,7 @@ func (m model) View() string {
 				m.statsMatchesList.SetSize(availableWidth, availableHeight)
 			}
 		}
-		return ui.RenderStatsViewWithList(m.width, m.height, m.statsMatchesList, m.matchDetails, m.randomSpinner, m.statsViewLoading, m.statsDateRange)
+		return ui.RenderStatsViewWithList(m.width, m.height, m.statsMatchesList, m.matchDetails, m.randomSpinner, m.statsViewLoading, m.statsDateRange, m.apiKeyMissing)
 	default:
 		return ui.RenderMainMenu(m.width, m.height, m.selected, m.spinner, m.randomSpinner, m.mainViewLoading)
 	}

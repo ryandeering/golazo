@@ -34,13 +34,36 @@ func RenderLiveMatchesListPanel(width, height int, listModel list.Model) string 
 
 // RenderStatsListPanel renders the left panel for stats view using bubbletea list component.
 // Note: listModel is passed by value, so SetSize must be called before this function.
-func RenderStatsListPanel(width, height int, listModel list.Model, dateRange int) string {
+func RenderStatsListPanel(width, height int, listModel list.Model, dateRange int, apiKeyMissing bool) string {
 	// Render date range selector
 	dateSelector := renderDateRangeSelector(width-6, dateRange)
 
 	// Wrap list in panel
 	title := panelTitleStyle.Width(width - 6).Render(constants.PanelFinishedMatches)
-	listView := listModel.View()
+
+	var listView string
+	if apiKeyMissing {
+		// Show API key missing message instead of empty list
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(dimColor).
+			Padding(2, 2).
+			Align(lipgloss.Center).
+			Width(width - 6).
+			Height(height - 8) // Reserve space for title and date selector
+		listView = emptyStyle.Render(constants.EmptyAPIKeyMissing)
+	} else {
+		listView = listModel.View()
+		// Check if list is empty and show appropriate message
+		if listModel.Items() == nil || len(listModel.Items()) == 0 {
+			emptyStyle := lipgloss.NewStyle().
+				Foreground(dimColor).
+				Padding(2, 2).
+				Align(lipgloss.Center).
+				Width(width - 6).
+				Height(height - 8) // Reserve space for title and date selector
+			listView = emptyStyle.Render(constants.EmptyNoFinishedMatches + "\n\nTry selecting a different date range (h/l keys)")
+		}
+	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -184,7 +207,7 @@ func RenderMultiPanelViewWithList(width, height int, listModel list.Model, detai
 }
 
 // RenderStatsViewWithList renders the stats view with list component.
-func RenderStatsViewWithList(width, height int, listModel list.Model, details *api.MatchDetails, randomSpinner *RandomCharSpinner, viewLoading bool, dateRange int) string {
+func RenderStatsViewWithList(width, height int, listModel list.Model, details *api.MatchDetails, randomSpinner *RandomCharSpinner, viewLoading bool, dateRange int, apiKeyMissing bool) string {
 	// Reserve 3 lines at top for spinner (always reserve to prevent layout shift)
 	spinnerHeight := 3
 	availableHeight := height - spinnerHeight
@@ -222,7 +245,7 @@ func RenderStatsViewWithList(width, height int, listModel list.Model, details *a
 	rightPanelHeight := panelHeight / 2 // Split right panel vertically
 
 	// Render left panel (finished matches list) - full height
-	leftPanel := RenderStatsListPanel(leftWidth, panelHeight, listModel, dateRange)
+	leftPanel := RenderStatsListPanel(leftWidth, panelHeight, listModel, dateRange, apiKeyMissing)
 
 	// Render right panels (overview top, statistics bottom)
 	overviewPanel := renderMatchOverviewPanel(rightWidth, rightPanelHeight, details)
