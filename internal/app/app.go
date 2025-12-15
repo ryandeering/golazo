@@ -28,6 +28,7 @@ type model struct {
 	height             int
 	currentView        view
 	matches            []ui.MatchDisplay
+	upcomingMatches    []ui.MatchDisplay // Upcoming matches for 1-day stats view
 	selected           int
 	matchDetails       *api.MatchDetails
 	liveUpdates        []string
@@ -40,13 +41,12 @@ type model struct {
 	useMockData        bool
 	fotmobClient       *fotmob.Client
 	footballDataClient *footballdata.Client
-	apiKeyMissing      bool // Track if API key is missing
 	parser             *fotmob.LiveUpdateParser
 	lastEvents         []api.MatchEvent
 	polling            bool
 	liveMatchesList    list.Model
 	statsMatchesList   list.Model
-	statsDateRange     int // 1, 3, or 7 days (default: 1)
+	statsDateRange     int // 1 or 3 days (default: 1)
 }
 
 // NewModel creates a new application model with default values.
@@ -60,13 +60,10 @@ func NewModel(useMockData bool) model {
 	randomSpinner := ui.NewRandomCharSpinner()
 	randomSpinner.SetWidth(30) // Wider spinner for more characters
 
-	// Initialize API-Sports.io client if API key is available
+	// Initialize API-Sports.io client if API key is available (kept for backward compatibility)
 	var footballDataClient *footballdata.Client
-	apiKeyMissing := false
 	if apiKey, err := data.FootballDataAPIKey(); err == nil {
 		footballDataClient = footballdata.NewClient(apiKey)
-	} else {
-		apiKeyMissing = true
 	}
 
 	// Initialize list models with custom delegate
@@ -88,10 +85,10 @@ func NewModel(useMockData bool) model {
 		spinner:            s,
 		randomSpinner:      randomSpinner,
 		liveUpdates:        []string{},
+		upcomingMatches:    []ui.MatchDisplay{},
 		useMockData:        useMockData,
 		fotmobClient:       fotmob.NewClient(),
 		footballDataClient: footballDataClient,
-		apiKeyMissing:      apiKeyMissing,
 		parser:             fotmob.NewLiveUpdateParser(),
 		lastEvents:         []api.MatchEvent{},
 		liveMatchesList:    liveList,
@@ -195,8 +192,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.polling = false
 				}
 			} else {
-				// For stats view, just set loading to false
+				// For stats view, set loading to false when match details are loaded
 				m.loading = false
+				m.statsViewLoading = false
 			}
 		} else {
 			m.loading = false
@@ -218,6 +216,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = false
 				m.polling = false
 				m.matches = []ui.MatchDisplay{}
+				m.upcomingMatches = []ui.MatchDisplay{}
 				return m, nil
 			}
 		}
@@ -345,7 +344,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.liveViewLoading = false
 		return m, tea.Batch(cmds...)
 	case finishedMatchesMsg:
-		m.statsViewLoading = false
 		// Convert to display format
 		displayMatches := make([]ui.MatchDisplay, 0, len(msg.matches))
 		for _, match := range msg.matches {
@@ -357,6 +355,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.matches = displayMatches
 		m.selected = 0
 		m.loading = false
+		// Keep statsViewLoading true to show spinner while loading match details - EXACTLY like live view
+		// Re-initialize spinner to ensure it's animating
+		cmds = append(cmds, m.randomSpinner.Init())
 
 		// Update list with items
 		m.statsMatchesList.SetItems(ui.ToMatchListItems(displayMatches))
@@ -365,10 +366,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Load details for first match if available
+		// This will keep statsViewLoading = true and initialize spinner
 		if len(m.matches) > 0 {
-			return m.loadStatsMatchDetails(m.matches[0].ID)
+			var loadCmd tea.Cmd
+			var updatedModel tea.Model
+			updatedModel, loadCmd = m.loadStatsMatchDetails(m.matches[0].ID)
+			if updatedM, ok := updatedModel.(model); ok {
+				m = updatedM
+			}
+			cmds = append(cmds, loadCmd)
+			return m, tea.Batch(cmds...)
 		}
 
+		// If no matches to load details for, stop loading
+		m.statsViewLoading = false
+		return m, tea.Batch(cmds...)
+	case upcomingMatchesMsg:
+		// Convert upcoming matches to display format
+		displayMatches := make([]ui.MatchDisplay, 0, len(msg.matches))
+		for _, match := range msg.matches {
+			displayMatches = append(displayMatches, ui.MatchDisplay{
+				Match: match,
+			})
+		}
+
+		m.upcomingMatches = displayMatches
 		return m, nil
 	case ui.TickMsg:
 		// Handle random spinner tick for all views
@@ -390,6 +412,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clear any previous view state
 		m.matches = []ui.MatchDisplay{}
+		m.upcomingMatches = []ui.MatchDisplay{}
 		m.matchDetails = nil
 		m.liveUpdates = []string{}
 		m.lastEvents = []api.MatchEvent{}
@@ -397,18 +420,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selected = 0
 
 		if msg.selection == 0 {
-			// Stats view
+			// Stats view - use FotMob API (no API key required)
 			m.statsViewLoading = true
-			if m.footballDataClient == nil {
-				// No API key configured, show empty state
-				m.currentView = viewStats
-				m.loading = false
-				m.statsViewLoading = false
-				return m, nil
-			}
 			m.currentView = viewStats
 			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.randomSpinner.Init(), fetchFinishedMatches(m.footballDataClient, m.useMockData, m.statsDateRange))
+
+			var cmds []tea.Cmd
+			cmds = append(cmds, m.spinner.Tick, m.randomSpinner.Init())
+
+			// Fetch finished matches using FotMob
+			cmds = append(cmds, fetchFinishedMatchesFotmob(m.fotmobClient, m.useMockData, m.statsDateRange))
+
+			// If 1-day period is selected, also fetch upcoming matches
+			if m.statsDateRange == 1 {
+				cmds = append(cmds, fetchUpcomingMatchesFotmob(m.fotmobClient, m.useMockData))
+			}
+
+			return m, tea.Batch(cmds...)
 		} else if msg.selection == 1 {
 			// Live Matches view
 			m.currentView = viewLiveMatches
@@ -503,31 +531,49 @@ func (m model) handleLiveMatchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleStatsViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "h", "left":
-		// Navigate date range selector left (cycle backwards: 1 -> 7 -> 3 -> 1)
+		// Navigate date range selector left (cycle backwards: 1 -> 3 -> 1)
 		if m.statsDateRange == 1 {
-			m.statsDateRange = 7
+			m.statsDateRange = 3
 		} else if m.statsDateRange == 3 {
 			m.statsDateRange = 1
-		} else if m.statsDateRange == 7 {
-			m.statsDateRange = 3
 		}
-		// Reload matches with new date range
+		// Reload matches with new date range using FotMob
 		m.statsViewLoading = true
 		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.randomSpinner.Init(), fetchFinishedMatches(m.footballDataClient, m.useMockData, m.statsDateRange))
+		m.upcomingMatches = []ui.MatchDisplay{} // Clear upcoming matches when changing range
+
+		var cmds []tea.Cmd
+		cmds = append(cmds, m.spinner.Tick, m.randomSpinner.Init())
+		cmds = append(cmds, fetchFinishedMatchesFotmob(m.fotmobClient, m.useMockData, m.statsDateRange))
+
+		// If 1-day period is selected, also fetch upcoming matches
+		if m.statsDateRange == 1 {
+			cmds = append(cmds, fetchUpcomingMatchesFotmob(m.fotmobClient, m.useMockData))
+		}
+
+		return m, tea.Batch(cmds...)
 	case "l", "right":
-		// Navigate date range selector right (cycle forwards: 1 -> 3 -> 7 -> 1)
+		// Navigate date range selector right (cycle forwards: 1 -> 3 -> 1)
 		if m.statsDateRange == 1 {
 			m.statsDateRange = 3
 		} else if m.statsDateRange == 3 {
-			m.statsDateRange = 7
-		} else if m.statsDateRange == 7 {
 			m.statsDateRange = 1
 		}
-		// Reload matches with new date range
+		// Reload matches with new date range using FotMob
 		m.statsViewLoading = true
 		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.randomSpinner.Init(), fetchFinishedMatches(m.footballDataClient, m.useMockData, m.statsDateRange))
+		m.upcomingMatches = []ui.MatchDisplay{} // Clear upcoming matches when changing range
+
+		var cmds []tea.Cmd
+		cmds = append(cmds, m.spinner.Tick, m.randomSpinner.Init())
+		cmds = append(cmds, fetchFinishedMatchesFotmob(m.fotmobClient, m.useMockData, m.statsDateRange))
+
+		// If 1-day period is selected, also fetch upcoming matches
+		if m.statsDateRange == 1 {
+			cmds = append(cmds, fetchUpcomingMatchesFotmob(m.fotmobClient, m.useMockData))
+		}
+
+		return m, tea.Batch(cmds...)
 	}
 	return m, nil
 }
@@ -543,11 +589,11 @@ func (m model) loadMatchDetails(matchID int) (tea.Model, tea.Cmd) {
 }
 
 // loadStatsMatchDetails loads match details for the stats view.
-// Fetches detailed statistics for a finished match.
+// Fetches detailed statistics for a finished match using FotMob API.
 func (m model) loadStatsMatchDetails(matchID int) (tea.Model, tea.Cmd) {
 	m.loading = true
 	m.statsViewLoading = true
-	return m, tea.Batch(m.spinner.Tick, m.randomSpinner.Init(), fetchStatsMatchDetails(m.footballDataClient, matchID, m.useMockData))
+	return m, tea.Batch(m.spinner.Tick, m.randomSpinner.Init(), fetchStatsMatchDetailsFotmob(m.fotmobClient, matchID, m.useMockData))
 }
 
 func (m model) View() string {
@@ -587,7 +633,9 @@ func (m model) View() string {
 				m.statsMatchesList.SetSize(availableWidth, availableHeight)
 			}
 		}
-		return ui.RenderStatsViewWithList(m.width, m.height, m.statsMatchesList, m.matchDetails, m.randomSpinner, m.statsViewLoading, m.statsDateRange, m.apiKeyMissing)
+		// Using FotMob (no API key required)
+		// Pass upcoming matches for 1-day view
+		return ui.RenderStatsViewWithList(m.width, m.height, m.statsMatchesList, m.matchDetails, m.randomSpinner, m.statsViewLoading, m.statsDateRange, false, m.upcomingMatches)
 	default:
 		return ui.RenderMainMenu(m.width, m.height, m.selected, m.spinner, m.randomSpinner, m.mainViewLoading)
 	}
@@ -691,10 +739,16 @@ type finishedMatchesMsg struct {
 	matches []api.Match
 }
 
+// upcomingMatchesMsg is a message containing upcoming matches.
+type upcomingMatchesMsg struct {
+	matches []api.Match
+}
+
 // fetchFinishedMatches fetches finished matches from the API-Sports.io API.
 // If useMockData is true, always uses mock data.
 // If useMockData is false, uses real API data (no fallback to mock data).
-// days specifies how many days to fetch (1, 3, or 7).
+// days specifies how many days to fetch (1 or 3).
+// NOTE: This function is kept for backward compatibility but is no longer used by default.
 func fetchFinishedMatches(client *footballdata.Client, useMockData bool, days int) tea.Cmd {
 	return func() tea.Msg {
 		// Use mock data if flag is set
@@ -723,10 +777,103 @@ func fetchFinishedMatches(client *footballdata.Client, useMockData bool, days in
 	}
 }
 
+// fetchFinishedMatchesFotmob fetches finished matches from the FotMob API.
+// If useMockData is true, always uses mock data.
+// If useMockData is false, uses real API data (no fallback to mock data).
+// days specifies how many days to fetch (1 or 3).
+func fetchFinishedMatchesFotmob(client *fotmob.Client, useMockData bool, days int) tea.Cmd {
+	return func() tea.Msg {
+		// Use mock data if flag is set
+		if useMockData {
+			matches := data.MockFinishedMatches()
+			return finishedMatchesMsg{matches: matches}
+		}
+
+		// If client is not available and not using mock data, return empty
+		if client == nil {
+			return finishedMatchesMsg{matches: []api.Match{}}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Fetch matches from last N days
+		matches, err := client.RecentFinishedMatches(ctx, days)
+		if err != nil {
+			// Return empty on error when not using mock data
+			return finishedMatchesMsg{matches: []api.Match{}}
+		}
+
+		// Return actual API results
+		return finishedMatchesMsg{matches: matches}
+	}
+}
+
+// fetchUpcomingMatchesFotmob fetches upcoming matches from the FotMob API for today.
+// Only used when 1-day period is selected in stats view.
+// If useMockData is true, always uses mock data.
+func fetchUpcomingMatchesFotmob(client *fotmob.Client, useMockData bool) tea.Cmd {
+	return func() tea.Msg {
+		// Use mock data if flag is set (reuse finished matches mock for now)
+		if useMockData {
+			// For mock data, return empty upcoming matches
+			return upcomingMatchesMsg{matches: []api.Match{}}
+		}
+
+		// If client is not available and not using mock data, return empty
+		if client == nil {
+			return upcomingMatchesMsg{matches: []api.Match{}}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Fetch upcoming matches for today
+		matches, err := client.UpcomingMatches(ctx)
+		if err != nil {
+			// Return empty on error when not using mock data
+			return upcomingMatchesMsg{matches: []api.Match{}}
+		}
+
+		// Return actual API results
+		return upcomingMatchesMsg{matches: matches}
+	}
+}
+
 // fetchStatsMatchDetails fetches match details from the API-Sports.io API.
 // If useMockData is true, always uses mock data.
 // If useMockData is false, uses real API data (no fallback to mock data).
+// NOTE: This function is kept for backward compatibility but is no longer used by default.
 func fetchStatsMatchDetails(client *footballdata.Client, matchID int, useMockData bool) tea.Cmd {
+	return func() tea.Msg {
+		// Use mock data if flag is set
+		if useMockData {
+			details, _ := data.MockFinishedMatchDetails(matchID)
+			return matchDetailsMsg{details: details}
+		}
+
+		// If client is not available and not using mock data, return nil
+		if client == nil {
+			return matchDetailsMsg{details: nil}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		details, err := client.MatchDetails(ctx, matchID)
+		if err != nil {
+			// Return nil on error when not using mock data
+			return matchDetailsMsg{details: nil}
+		}
+
+		return matchDetailsMsg{details: details}
+	}
+}
+
+// fetchStatsMatchDetailsFotmob fetches match details from the FotMob API.
+// If useMockData is true, always uses mock data.
+// If useMockData is false, uses real API data (no fallback to mock data).
+func fetchStatsMatchDetailsFotmob(client *fotmob.Client, matchID int, useMockData bool) tea.Cmd {
 	return func() tea.Msg {
 		// Use mock data if flag is set
 		if useMockData {
