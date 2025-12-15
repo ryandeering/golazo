@@ -60,11 +60,21 @@ func (r *RandomCharSpinner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the spinner with gradient colors.
+// Uses currentIdx to ensure consistent animation when tick updates occur.
+// Always returns a non-empty string to ensure spinner is visible.
 func (r *RandomCharSpinner) View() string {
-	// Create a string of random characters for the spinner
+	// Ensure width is at least 1 to always return visible content
+	if r.width <= 0 {
+		r.width = 20 // Default width if somehow zero
+	}
+
+	// Create a string of characters for the spinner
+	// Use currentIdx as base and add position offset for variation
 	spinnerChars := make([]rune, r.width)
 	for i := range spinnerChars {
-		spinnerChars[i] = r.chars[rand.Intn(len(r.chars))]
+		// Use currentIdx + position offset to create animated effect
+		charIdx := (r.currentIdx + i) % len(r.chars)
+		spinnerChars[i] = r.chars[charIdx]
 	}
 
 	// Apply gradient to each character
