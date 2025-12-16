@@ -128,16 +128,43 @@ type fotmobMatchDetails struct {
 		Status status `json:"status"`
 	} `json:"header"`
 	General struct {
-		ID     string `json:"id"`
-		Round  string `json:"round"`
-		Home   team   `json:"home"`
-		Away   team   `json:"away"`
-		League league `json:"league"`
+		MatchID  string `json:"matchId"`
+		Round    string `json:"matchRound"`
+		HomeTeam struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"homeTeam"`
+		AwayTeam struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"awayTeam"`
+		LeagueID   int    `json:"leagueId"`
+		LeagueName string `json:"leagueName"`
 	} `json:"general"`
 	Content struct {
 		MatchFacts struct {
-			Events []fotmobEventDetail `json:"events"`
+			Events struct {
+				Events []fotmobEventDetail `json:"events"`
+			} `json:"events"`
+			InfoBox struct {
+				Stadium struct {
+					Name string `json:"name"`
+				} `json:"Stadium,omitempty"`
+			} `json:"infoBox,omitempty"`
 		} `json:"matchFacts"`
+		Stats struct {
+			Periods struct {
+				All struct {
+					Stats []struct {
+						Title string `json:"title"`
+						Stats []struct {
+							Key   string `json:"key"`
+							Value string `json:"value"`
+						} `json:"stats"`
+					} `json:"stats"`
+				} `json:"all,omitempty"`
+			} `json:"periods,omitempty"`
+		} `json:"stats,omitempty"`
 	} `json:"content"`
 }
 
@@ -174,24 +201,119 @@ type fotmobEventDetail struct {
 
 // toAPIMatchDetails converts fotmobMatchDetails to api.MatchDetails
 func (m fotmobMatchDetails) toAPIMatchDetails() *api.MatchDetails {
-	// Extract match info from general and header
-	baseMatch := fotmobMatch{
-		ID:     m.General.ID,
-		Round:  m.General.Round,
-		Home:   m.General.Home,
-		Away:   m.General.Away,
-		Status: m.Header.Status,
-		League: m.General.League,
-	}.toAPIMatch()
+	// Parse match ID from string
+	matchID := parseInt(m.General.MatchID)
+
+	// Determine match status from header
+	var status api.MatchStatus
+	var liveTime *string
+	if m.Header.Status.Cancelled != nil && *m.Header.Status.Cancelled {
+		status = api.MatchStatusCancelled
+	} else if m.Header.Status.Finished != nil && *m.Header.Status.Finished {
+		status = api.MatchStatusFinished
+	} else if m.Header.Status.Started != nil && *m.Header.Status.Started {
+		status = api.MatchStatusLive
+		if m.Header.Status.LiveTime != nil {
+			liveTime = &m.Header.Status.LiveTime.Short
+		}
+	} else {
+		status = api.MatchStatusNotStarted
+	}
+
+	// Parse match time
+	var matchTime *time.Time
+	if m.Header.Status.UTCTime != "" {
+		t, err := time.Parse(time.RFC3339, m.Header.Status.UTCTime)
+		if err != nil {
+			t, err = time.Parse("2006-01-02T15:04:05.000Z", m.Header.Status.UTCTime)
+		}
+		if err == nil {
+			matchTime = &t
+		}
+	}
+
+	// Build the base match
+	baseMatch := api.Match{
+		ID: matchID,
+		League: api.League{
+			ID:   m.General.LeagueID,
+			Name: m.General.LeagueName,
+		},
+		HomeTeam: api.Team{
+			ID:        m.General.HomeTeam.ID,
+			Name:      m.General.HomeTeam.Name,
+			ShortName: m.General.HomeTeam.Name, // Use full name as short name if not available
+		},
+		AwayTeam: api.Team{
+			ID:        m.General.AwayTeam.ID,
+			Name:      m.General.AwayTeam.Name,
+			ShortName: m.General.AwayTeam.Name, // Use full name as short name if not available
+		},
+		Status:    status,
+		LiveTime:  liveTime,
+		MatchTime: matchTime,
+		Round:     m.General.Round,
+	}
 
 	details := &api.MatchDetails{
 		Match:  baseMatch,
 		Events: make([]api.MatchEvent, 0),
 	}
 
+	// Populate scores from header.Teams
+	if len(m.Header.Teams) >= 2 {
+		homeScore := m.Header.Teams[0].Score
+		awayScore := m.Header.Teams[1].Score
+		details.Match.HomeScore = &homeScore
+		details.Match.AwayScore = &awayScore
+
+		// Determine winner for finished matches
+		if status == api.MatchStatusFinished {
+			if homeScore > awayScore {
+				winner := "home"
+				details.Winner = &winner
+			} else if awayScore > homeScore {
+				winner := "away"
+				details.Winner = &winner
+			}
+		}
+	}
+
+	// Populate venue from infoBox
+	if m.Content.MatchFacts.InfoBox.Stadium.Name != "" {
+		details.Venue = m.Content.MatchFacts.InfoBox.Stadium.Name
+	}
+
+	// Extract half-time score from events (look for "Half" event type)
+	// Also set match duration (default to 90, but can be 120 for extra time)
+	details.MatchDuration = 90
+	for _, e := range m.Content.MatchFacts.Events.Events {
+		if e.Type == "Half" && (e.HomeScore > 0 || e.AwayScore > 0) {
+			// Found half-time score
+			if details.HalfTimeScore == nil {
+				details.HalfTimeScore = &struct {
+					Home *int `json:"home,omitempty"`
+					Away *int `json:"away,omitempty"`
+				}{}
+			}
+			htHome := e.HomeScore
+			htAway := e.AwayScore
+			details.HalfTimeScore.Home = &htHome
+			details.HalfTimeScore.Away = &htAway
+		}
+		// Check for extra time indicators (events after 90 minutes)
+		if e.Time > 90 {
+			details.ExtraTime = true
+			details.MatchDuration = 120
+		}
+	}
+
+	// Populate match events (already being done below, but ensure they're added)
+	// Events are converted from content.matchFacts.events
+
 	// Convert events from content.matchFacts.events
-	events := make([]api.MatchEvent, 0, len(m.Content.MatchFacts.Events))
-	for _, e := range m.Content.MatchFacts.Events {
+	events := make([]api.MatchEvent, 0, len(m.Content.MatchFacts.Events.Events))
+	for _, e := range m.Content.MatchFacts.Events.Events {
 		// Skip non-event types like "Half"
 		if e.Type == "Half" {
 			continue
@@ -238,19 +360,19 @@ func (m fotmobMatchDetails) toAPIMatchDetails() *api.MatchDetails {
 		}
 
 		// Set team based on isHome flag
-		homeIDInt := parseInt(m.General.Home.ID)
-		awayIDInt := parseInt(m.General.Away.ID)
+		homeIDInt := m.General.HomeTeam.ID
+		awayIDInt := m.General.AwayTeam.ID
 		if e.IsHome {
 			event.Team = api.Team{
 				ID:        homeIDInt,
-				Name:      m.General.Home.Name,
-				ShortName: m.General.Home.ShortName,
+				Name:      m.General.HomeTeam.Name,
+				ShortName: m.General.HomeTeam.Name,
 			}
 		} else {
 			event.Team = api.Team{
 				ID:        awayIDInt,
-				Name:      m.General.Away.Name,
-				ShortName: m.General.Away.ShortName,
+				Name:      m.General.AwayTeam.Name,
+				ShortName: m.General.AwayTeam.Name,
 			}
 		}
 
