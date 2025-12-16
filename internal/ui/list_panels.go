@@ -319,15 +319,15 @@ func RenderStatsViewWithList(width, height int, finishedList list.Model, upcomin
 }
 
 // renderStatsMatchDetailsPanel renders the right panel for stats view with match details.
-// This is a simplified version that always shows basic match info regardless of match status.
-// Designed to be expandable for more detailed statistics in the future.
+// Clean, minimalistic design with bordered sections inspired by modern TUI dashboards.
+// Uses the app's cyan/red brand theme throughout.
 func renderStatsMatchDetailsPanel(width, height int, details *api.MatchDetails) string {
 	if details == nil {
 		emptyMessage := lipgloss.NewStyle().
 			Foreground(dimColor).
 			Align(lipgloss.Center).
-			Width(width - 6).
-			PaddingTop(2).
+			Width(width - 4).
+			PaddingTop(height / 3).
 			Render("Select a match to view details")
 
 		return panelStyle.
@@ -336,14 +336,52 @@ func renderStatsMatchDetailsPanel(width, height int, details *api.MatchDetails) 
 			Render(emptyMessage)
 	}
 
-	var content strings.Builder
-	infoStyle := lipgloss.NewStyle().Foreground(dimColor)
+	// Brand colors: cyan (51) for accents/headers, red (196) for highlights/scores
+	contentWidth := width - 4
 
-	// Match Header: Teams and Score
-	teamStyle := lipgloss.NewStyle().
-		Foreground(textColor).
+	// Section box style - cyan borders
+	sectionStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentColor). // cyan borders
+		Padding(0, 1).
+		Width(contentWidth - 2)
+
+	// Section header style - cyan
+	headerStyle := lipgloss.NewStyle().
+		Foreground(accentColor). // cyan headers
 		Bold(true)
 
+	// Label style for key-value pairs
+	labelStyle := lipgloss.NewStyle().
+		Foreground(dimColor).
+		Width(14)
+
+	// Value style
+	valueStyle := lipgloss.NewStyle().
+		Foreground(textColor)
+
+	// Score/highlight style - red for emphasis
+	scoreStyle := lipgloss.NewStyle().
+		Foreground(secondaryColor). // red for scores
+		Bold(true)
+
+	// Team name style - cyan accent
+	teamNameStyle := lipgloss.NewStyle().
+		Foreground(accentColor). // cyan for team names
+		Bold(true)
+
+	// Helper to create key-value row
+	kvRow := func(label, value string) string {
+		return lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			labelStyle.Render(label+":"),
+			valueStyle.Render(" "+value),
+		)
+	}
+
+	var sections []string
+
+	// === MATCH INFO SECTION ===
 	homeTeam := details.HomeTeam.ShortName
 	if homeTeam == "" {
 		homeTeam = details.HomeTeam.Name
@@ -353,127 +391,235 @@ func renderStatsMatchDetailsPanel(width, height int, details *api.MatchDetails) 
 		awayTeam = details.AwayTeam.Name
 	}
 
-	// Score display
-	if details.HomeScore != nil && details.AwayScore != nil {
-		scoreText := fmt.Sprintf("%s  %d - %d  %s", homeTeam, *details.HomeScore, *details.AwayScore, awayTeam)
-		content.WriteString(teamStyle.Render(scoreText))
-	} else {
-		matchupText := fmt.Sprintf("%s vs %s", homeTeam, awayTeam)
-		content.WriteString(teamStyle.Render(matchupText))
-	}
-	content.WriteString("\n")
-
-	// Status
+	// Status text with brand colors
 	var statusText string
+	var statusStyle lipgloss.Style
 	switch details.Status {
 	case api.MatchStatusFinished:
-		statusText = "Full Time"
+		statusText = "FT"
+		statusStyle = lipgloss.NewStyle().Foreground(accentColor) // cyan for completed
 	case api.MatchStatusLive:
 		if details.LiveTime != nil {
 			statusText = *details.LiveTime
 		} else {
 			statusText = "LIVE"
 		}
+		statusStyle = lipgloss.NewStyle().Foreground(secondaryColor).Bold(true) // red for live
 	case api.MatchStatusNotStarted:
 		if details.MatchTime != nil {
 			statusText = details.MatchTime.Format("15:04")
 		} else {
-			statusText = "Not Started"
+			statusText = "TBD"
 		}
+		statusStyle = lipgloss.NewStyle().Foreground(dimColor)
 	default:
 		statusText = string(details.Status)
+		statusStyle = lipgloss.NewStyle().Foreground(dimColor)
 	}
-	content.WriteString(infoStyle.Render(statusText))
-	content.WriteString("\n")
 
-	// League
+	matchInfoLines := []string{
+		headerStyle.Render("Match Info"),
+	}
+
+	// Score line - red highlight for scores, cyan for team names
+	if details.HomeScore != nil && details.AwayScore != nil {
+		scoreDisplay := lipgloss.JoinHorizontal(lipgloss.Center,
+			teamNameStyle.Render(homeTeam),
+			scoreStyle.Render(fmt.Sprintf(" %d - %d ", *details.HomeScore, *details.AwayScore)),
+			teamNameStyle.Render(awayTeam),
+		)
+		matchInfoLines = append(matchInfoLines, lipgloss.NewStyle().Width(contentWidth-4).Align(lipgloss.Center).Render(scoreDisplay))
+	} else {
+		matchupDisplay := lipgloss.JoinHorizontal(lipgloss.Center,
+			teamNameStyle.Render(homeTeam),
+			valueStyle.Render(" vs "),
+			teamNameStyle.Render(awayTeam),
+		)
+		matchInfoLines = append(matchInfoLines, lipgloss.NewStyle().Width(contentWidth-4).Align(lipgloss.Center).Render(matchupDisplay))
+	}
+
+	matchInfoLines = append(matchInfoLines,
+		kvRow("Status", statusStyle.Render(statusText)),
+	)
+
 	if details.League.Name != "" {
-		content.WriteString(infoStyle.Italic(true).Render(details.League.Name))
-		content.WriteString("\n")
+		matchInfoLines = append(matchInfoLines, kvRow("League", details.League.Name))
 	}
 
-	// Venue (if available)
 	if details.Venue != "" {
-		content.WriteString(infoStyle.Render("📍 " + details.Venue))
-		content.WriteString("\n")
+		matchInfoLines = append(matchInfoLines, kvRow("Venue", details.Venue))
 	}
 
-	// Half-time score (if available)
+	if details.MatchTime != nil {
+		matchInfoLines = append(matchInfoLines, kvRow("Date", details.MatchTime.Format("02 Jan 2006")))
+	}
+
 	if details.HalfTimeScore != nil && details.HalfTimeScore.Home != nil && details.HalfTimeScore.Away != nil {
-		htText := fmt.Sprintf("HT: %d - %d", *details.HalfTimeScore.Home, *details.HalfTimeScore.Away)
-		content.WriteString(infoStyle.Render(htText))
-		content.WriteString("\n")
+		htScore := fmt.Sprintf("%d - %d", *details.HalfTimeScore.Home, *details.HalfTimeScore.Away)
+		matchInfoLines = append(matchInfoLines, kvRow("Half-Time", htScore))
 	}
 
-	content.WriteString("\n")
+	sections = append(sections, sectionStyle.Render(strings.Join(matchInfoLines, "\n")))
 
-	// Goals section (if any)
-	var goals []api.MatchEvent
+	// === GOALS SECTION ===
+	var homeGoals, awayGoals []api.MatchEvent
 	for _, event := range details.Events {
 		if event.Type == "goal" {
-			goals = append(goals, event)
+			if event.Team.ID == details.HomeTeam.ID {
+				homeGoals = append(homeGoals, event)
+			} else {
+				awayGoals = append(awayGoals, event)
+			}
 		}
 	}
 
-	if len(goals) > 0 {
-		goalsTitle := lipgloss.NewStyle().
-			Foreground(accentColor).
-			Bold(true).
-			Render("⚽ Goals")
-		content.WriteString(goalsTitle)
-		content.WriteString("\n")
-
-		for _, goal := range goals {
-			player := "Unknown"
-			if goal.Player != nil {
-				player = *goal.Player
-			}
-			team := goal.Team.ShortName
-			if team == "" {
-				team = goal.Team.Name
-			}
-			goalLine := fmt.Sprintf("%d' %s (%s)", goal.Minute, player, team)
-			content.WriteString(infoStyle.Render(goalLine))
-			content.WriteString("\n")
+	if len(homeGoals) > 0 || len(awayGoals) > 0 {
+		goalsLines := []string{
+			headerStyle.Render("Goals"),
 		}
-		content.WriteString("\n")
+
+		// Goal minute style - red accent
+		minuteStyle := lipgloss.NewStyle().Foreground(secondaryColor).Bold(true)
+
+		// Home team goals
+		if len(homeGoals) > 0 {
+			goalsLines = append(goalsLines, teamNameStyle.Render(homeTeam))
+			for _, goal := range homeGoals {
+				player := "Unknown"
+				if goal.Player != nil {
+					player = *goal.Player
+				}
+				goalLine := lipgloss.JoinHorizontal(lipgloss.Left,
+					minuteStyle.Render(fmt.Sprintf("  %d'", goal.Minute)),
+					valueStyle.Render("  "+player),
+				)
+				goalsLines = append(goalsLines, goalLine)
+			}
+		}
+
+		// Away team goals
+		if len(awayGoals) > 0 {
+			goalsLines = append(goalsLines, teamNameStyle.Render(awayTeam))
+			for _, goal := range awayGoals {
+				player := "Unknown"
+				if goal.Player != nil {
+					player = *goal.Player
+				}
+				goalLine := lipgloss.JoinHorizontal(lipgloss.Left,
+					minuteStyle.Render(fmt.Sprintf("  %d'", goal.Minute)),
+					valueStyle.Render("  "+player),
+				)
+				goalsLines = append(goalsLines, goalLine)
+			}
+		}
+
+		sections = append(sections, sectionStyle.Render(strings.Join(goalsLines, "\n")))
 	}
 
-	// Cards section (count only)
-	var yellowCards, redCards int
+	// === CARDS SECTION ===
+	var homeYellow, homeRed, awayYellow, awayRed int
 	for _, event := range details.Events {
 		if event.Type == "card" {
+			isHome := event.Team.ID == details.HomeTeam.ID
 			if event.EventType != nil {
-				if *event.EventType == "yellow" {
-					yellowCards++
-				} else if *event.EventType == "red" {
-					redCards++
+				switch *event.EventType {
+				case "yellow":
+					if isHome {
+						homeYellow++
+					} else {
+						awayYellow++
+					}
+				case "red":
+					if isHome {
+						homeRed++
+					} else {
+						awayRed++
+					}
 				}
 			}
 		}
 	}
 
-	if yellowCards > 0 || redCards > 0 {
-		cardsTitle := lipgloss.NewStyle().
-			Foreground(accentColor).
-			Bold(true).
-			Render("Cards")
-		content.WriteString(cardsTitle)
-		content.WriteString("\n")
+	totalCards := homeYellow + homeRed + awayYellow + awayRed
+	if totalCards > 0 {
+		cardsLines := []string{
+			headerStyle.Render("Cards"),
+		}
 
-		cardParts := make([]string, 0)
-		if yellowCards > 0 {
-			cardParts = append(cardParts, fmt.Sprintf("%d🟨", yellowCards))
+		// Card visual styles - cyan for yellow cards, red for red cards (brand colors)
+		yellowCardStyle := lipgloss.NewStyle().Foreground(accentColor) // cyan blocks for yellow
+		redCardStyle := lipgloss.NewStyle().Foreground(secondaryColor) // red blocks for red
+
+		// Team card summary with visual bars
+		homeCardsStr := ""
+		if homeYellow > 0 {
+			homeCardsStr += yellowCardStyle.Render(strings.Repeat("▪", homeYellow))
 		}
-		if redCards > 0 {
-			cardParts = append(cardParts, fmt.Sprintf("%d🟥", redCards))
+		if homeRed > 0 {
+			if homeCardsStr != "" {
+				homeCardsStr += " "
+			}
+			homeCardsStr += redCardStyle.Render(strings.Repeat("▪", homeRed))
 		}
-		content.WriteString(infoStyle.Render(strings.Join(cardParts, " ")))
-		content.WriteString("\n")
+		if homeCardsStr == "" {
+			homeCardsStr = lipgloss.NewStyle().Foreground(dimColor).Render("-")
+		}
+
+		awayCardsStr := ""
+		if awayYellow > 0 {
+			awayCardsStr += yellowCardStyle.Render(strings.Repeat("▪", awayYellow))
+		}
+		if awayRed > 0 {
+			if awayCardsStr != "" {
+				awayCardsStr += " "
+			}
+			awayCardsStr += redCardStyle.Render(strings.Repeat("▪", awayRed))
+		}
+		if awayCardsStr == "" {
+			awayCardsStr = lipgloss.NewStyle().Foreground(dimColor).Render("-")
+		}
+
+		cardsLines = append(cardsLines, kvRow(homeTeam, homeCardsStr))
+		cardsLines = append(cardsLines, kvRow(awayTeam, awayCardsStr))
+
+		// Summary row
+		summaryStyle := lipgloss.NewStyle().Foreground(dimColor).Italic(true)
+		totalSummary := fmt.Sprintf("Total: %d yellow, %d red", homeYellow+awayYellow, homeRed+awayRed)
+		cardsLines = append(cardsLines, summaryStyle.Render(totalSummary))
+
+		sections = append(sections, sectionStyle.Render(strings.Join(cardsLines, "\n")))
 	}
+
+	// === MATCH STATS SECTION ===
+	statsLines := []string{
+		headerStyle.Render("Match Stats"),
+	}
+
+	// Event counts as simple stats
+	var subs int
+	for _, event := range details.Events {
+		if event.Type == "substitution" {
+			subs++
+		}
+	}
+
+	// Stats with cyan accent for numbers
+	statNumStyle := lipgloss.NewStyle().Foreground(accentColor)
+	statsLines = append(statsLines, kvRow("Events", statNumStyle.Render(fmt.Sprintf("%d", len(details.Events)))))
+	if subs > 0 {
+		statsLines = append(statsLines, kvRow("Substitutions", statNumStyle.Render(fmt.Sprintf("%d", subs))))
+	}
+
+	// Only show stats section if there's meaningful data
+	if len(details.Events) > 0 {
+		sections = append(sections, sectionStyle.Render(strings.Join(statsLines, "\n")))
+	}
+
+	// Combine all sections with spacing
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	return panelStyle.
 		Width(width).
 		Height(height).
-		Render(content.String())
+		Render(content)
 }
