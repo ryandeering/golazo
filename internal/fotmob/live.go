@@ -128,7 +128,8 @@ const (
 	EventPrefixOther       = "·" // Small dot - other events (dim)
 )
 
-// formatEvent formats a single event into a readable string with symbol prefix.
+// formatEvent formats a single event into a readable string with symbol prefix and label.
+// Format: SYMBOL TIME' [LABEL] details - team
 // Symbol prefixes are used by the UI to apply appropriate colors.
 func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam api.Team) string {
 	teamName := event.Team.ShortName
@@ -151,7 +152,7 @@ func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam 
 		if event.Assist != nil && *event.Assist != "" {
 			assistText = fmt.Sprintf(" (%s)", *event.Assist)
 		}
-		return fmt.Sprintf("%s %d' %s%s - %s", EventPrefixGoal, event.Minute, player, assistText, teamName)
+		return fmt.Sprintf("%s %d' [GOAL] %s%s - %s", EventPrefixGoal, event.Minute, player, assistText, teamName)
 
 	case "card":
 		player := "Unknown"
@@ -166,7 +167,7 @@ func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam 
 		if cardType == "red" || cardType == "redcard" || cardType == "secondyellow" {
 			prefix = EventPrefixRedCard
 		}
-		return fmt.Sprintf("%s %d' %s - %s", prefix, event.Minute, player, teamName)
+		return fmt.Sprintf("%s %d' [CARD] %s - %s", prefix, event.Minute, player, teamName)
 
 	case "substitution":
 		player := "Unknown"
@@ -181,7 +182,7 @@ func (p *LiveUpdateParser) formatEvent(event api.MatchEvent, homeTeam, awayTeam 
 		if subType == "in" {
 			arrow = "←"
 		}
-		return fmt.Sprintf("%s %d' %s %s - %s", EventPrefixSubstitution, event.Minute, arrow, player, teamName)
+		return fmt.Sprintf("%s %d' [SUB] %s %s - %s", EventPrefixSubstitution, event.Minute, arrow, player, teamName)
 
 	default:
 		player := ""
