@@ -102,12 +102,18 @@ func New(useMockData bool) model {
 	// Initialize list models with custom delegate
 	delegate := ui.NewMatchListDelegate()
 
+	// Filter input styles matching neon theme
+	filterCursorStyle, filterPromptStyle := ui.FilterInputStyles()
+
 	liveList := list.New([]list.Item{}, delegate, 0, 0)
 	liveList.SetShowTitle(false)
 	liveList.SetShowStatusBar(true)
 	liveList.SetFilteringEnabled(true)
 	liveList.SetShowFilter(true)
 	liveList.Filter = list.DefaultFilter // Required for filtering to work
+	liveList.Styles.FilterCursor = filterCursorStyle
+	liveList.FilterInput.PromptStyle = filterPromptStyle
+	liveList.FilterInput.Cursor.Style = filterCursorStyle
 
 	statsList := list.New([]list.Item{}, delegate, 0, 0)
 	statsList.SetShowTitle(false)
@@ -115,6 +121,9 @@ func New(useMockData bool) model {
 	statsList.SetFilteringEnabled(true)
 	statsList.SetShowFilter(true)
 	statsList.Filter = list.DefaultFilter // Required for filtering to work
+	statsList.Styles.FilterCursor = filterCursorStyle
+	statsList.FilterInput.PromptStyle = filterPromptStyle
+	statsList.FilterInput.Cursor.Style = filterCursorStyle
 
 	upcomingList := list.New([]list.Item{}, delegate, 0, 0)
 	upcomingList.SetShowTitle(false)
@@ -122,6 +131,9 @@ func New(useMockData bool) model {
 	upcomingList.SetFilteringEnabled(true)
 	upcomingList.SetShowFilter(true)
 	upcomingList.Filter = list.DefaultFilter // Required for filtering to work
+	upcomingList.Styles.FilterCursor = filterCursorStyle
+	upcomingList.FilterInput.PromptStyle = filterPromptStyle
+	upcomingList.FilterInput.Cursor.Style = filterCursorStyle
 
 	return model{
 		currentView:         viewMain,
