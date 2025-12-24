@@ -55,26 +55,6 @@ var (
 				Foreground(lipgloss.Color("196")). // neon red for live
 				Bold(true)
 
-	// Event styles - Neon readable
-	eventMinuteStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")). // dim
-				Bold(true).
-				Width(4).
-				Align(lipgloss.Right).
-				MarginRight(0)
-
-	eventTextStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("255")). // neon white
-			MarginLeft(0)
-
-	eventGoalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")). // neon red
-			Bold(true)
-
-	eventCardStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")). // neon red
-			Bold(true)
-
 	// Live update styles - Neon
 	liveUpdateStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("255")). // neon white
@@ -406,75 +386,6 @@ func renderMatchDetailsPanelFull(width, height int, details *api.MatchDetails, l
 		Render(panelContent)
 
 	return panel
-}
-
-func renderEvent(event api.MatchEvent, width int) string {
-	// Minute - compact
-	minute := eventMinuteStyle.Render(fmt.Sprintf("%d'", event.Minute))
-
-	// Event text based on type
-	var eventText string
-	switch event.Type {
-	case "goal":
-		player := "Unknown"
-		if event.Player != nil {
-			player = *event.Player
-		}
-		assistText := ""
-		if event.Assist != nil {
-			assistText = fmt.Sprintf(" (assist: %s)", *event.Assist)
-		}
-		eventText = eventGoalStyle.Render(fmt.Sprintf("Goal: %s%s", player, assistText))
-	case "card":
-		player := "Unknown"
-		if event.Player != nil {
-			player = *event.Player
-		}
-		cardType := "Yellow"
-		if event.EventType != nil {
-			if *event.EventType == "red" {
-				cardType = "Red"
-			}
-		}
-		eventText = eventCardStyle.Render(fmt.Sprintf("Card (%s): %s", cardType, player))
-	case "substitution":
-		player := "Unknown"
-		if event.Player != nil {
-			player = *event.Player
-		}
-		subType := "Sub"
-		if event.EventType != nil {
-			if *event.EventType == "in" {
-				subType = "In"
-			} else if *event.EventType == "out" {
-				subType = "Out"
-			}
-		}
-		eventText = eventTextStyle.Render(fmt.Sprintf("%s: %s", subType, player))
-	default:
-		eventText = eventTextStyle.Render(event.Type)
-	}
-
-	// Team name - subtle
-	teamName := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Render(event.Team.ShortName)
-
-	line := lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		minute,
-		" ",
-		eventText,
-		" ",
-		teamName,
-	)
-
-	// Truncate if needed
-	if len(line) > width {
-		line = Truncate(line, width)
-	}
-
-	return line
 }
 
 // formatMatchEventForDisplay formats a match event for display in the stats view

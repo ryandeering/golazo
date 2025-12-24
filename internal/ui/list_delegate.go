@@ -58,8 +58,3 @@ func NewMatchListDelegate() list.DefaultDelegate {
 
 	return d
 }
-
-// MatchListStyles returns styles for the list component.
-func MatchListStyles() lipgloss.Style {
-	return panelStyle
-}
