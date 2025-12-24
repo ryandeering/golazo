@@ -544,6 +544,12 @@ func renderStatsMatchDetailsPanel(width, height int, details *api.MatchDetails) 
 		Render(content)
 }
 
+// RenderMatchDetailsPanel is an exported version of renderStatsMatchDetailsPanel
+// for use by debug scripts. Renders match details in the Golazo stats view style.
+func RenderMatchDetailsPanel(width, height int, details *api.MatchDetails) string {
+	return renderStatsMatchDetailsPanel(width, height, details)
+}
+
 // renderGoalLine renders a single goal with scorer, minute, and assist
 func renderGoalLine(g api.MatchEvent, maxWidth int) string {
 	player := "Unknown"
