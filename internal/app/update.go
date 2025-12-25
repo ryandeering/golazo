@@ -213,6 +213,11 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case viewStats:
 			isFiltering = m.statsMatchesList.FilterState() == list.Filtering ||
 				m.statsMatchesList.FilterState() == list.FilterApplied
+		case viewSettings:
+			if m.settingsState != nil {
+				isFiltering = m.settingsState.List.FilterState() == list.Filtering ||
+					m.settingsState.List.FilterState() == list.FilterApplied
+			}
 		}
 
 		if isFiltering {
