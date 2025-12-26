@@ -169,7 +169,7 @@ func schedulePollTick(matchID int) tea.Cmd {
 }
 
 // PollSpinnerDuration is how long to show the "Updating..." spinner.
-const PollSpinnerDuration = 500 * time.Millisecond
+const PollSpinnerDuration = 1 * time.Second
 
 // schedulePollSpinnerHide schedules hiding the spinner after the display duration.
 func schedulePollSpinnerHide() tea.Cmd {

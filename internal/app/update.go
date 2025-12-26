@@ -185,11 +185,11 @@ func (m model) handleMatchDetails(msg matchDetailsMsg) (tea.Model, tea.Cmd) {
 		// Continue polling if match is live
 		if msg.details.Status == api.MatchStatusLive {
 			// For initial load, clear loading state
-			// For poll refresh, loading is cleared by 0.5s timer (pollDisplayCompleteMsg)
+			// For poll refresh, loading is cleared by 1s timer (pollDisplayCompleteMsg)
 			if !m.polling {
 				m.loading = false
 			}
-			// Note: if m.polling is true, m.loading stays true until the 0.5s timer fires
+			// Note: if m.polling is true, m.loading stays true until the 1s timer fires
 
 			m.polling = true
 			// Schedule next poll tick (90 seconds from now)
@@ -811,7 +811,7 @@ func (m model) handleMainViewCheck(msg mainViewCheckMsg) (tea.Model, tea.Cmd) {
 }
 
 // handlePollTick handles the 90-second poll tick.
-// Shows "Updating..." spinner for 0.5s as visual feedback, then fetches data.
+// Shows "Updating..." spinner for 1s as visual feedback, then fetches data.
 func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	// Only process if we're still in live view and polling is active
 	if m.currentView != viewLiveMatches || !m.polling {
@@ -826,7 +826,7 @@ func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	// Set loading state to show "Updating..." spinner
 	m.loading = true
 
-	// Start the actual API call, spinner animation, and 0.5s display timer
+	// Start the actual API call, spinner animation, and 1s display timer
 	return m, tea.Batch(
 		fetchPollMatchDetails(m.fotmobClient, msg.matchID, m.useMockData),
 		ui.SpinnerTick(),
@@ -834,9 +834,9 @@ func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	)
 }
 
-// handlePollDisplayComplete hides the spinner after 0.5s display time.
+// handlePollDisplayComplete hides the spinner after 1s display time.
 func (m model) handlePollDisplayComplete() (tea.Model, tea.Cmd) {
-	// Hide spinner - the 0.5s visual feedback is complete
+	// Hide spinner - the 1s visual feedback is complete
 	m.loading = false
 	return m, nil
 }
