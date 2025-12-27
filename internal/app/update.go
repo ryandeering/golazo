@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	"github.com/0xjuanma/golazo/internal/api"
@@ -177,6 +178,27 @@ func (m model) handleMatchDetails(msg matchDetailsMsg) (tea.Model, tea.Cmd) {
 	if m.currentView == viewLiveMatches || m.pendingSelection == 1 {
 		m.liveViewLoading = false
 
+		// Get current scores
+		homeScore := 0
+		awayScore := 0
+		if msg.details.HomeScore != nil {
+			homeScore = *msg.details.HomeScore
+		}
+		if msg.details.AwayScore != nil {
+			awayScore = *msg.details.AwayScore
+		}
+
+		// Detect new goals during poll refresh (not initial load)
+		// Only notify when: polling is active AND we have previous score data
+		hasScoreData := m.lastHomeScore > 0 || m.lastAwayScore > 0 || len(m.lastEvents) > 0
+		if m.polling && hasScoreData {
+			m.notifyNewGoals(msg.details)
+		}
+
+		// Update tracked scores for next comparison
+		m.lastHomeScore = homeScore
+		m.lastAwayScore = awayScore
+
 		// Parse ALL events to rebuild the live updates list
 		// This ensures proper ordering (descending by minute) and uniqueness
 		m.liveUpdates = m.parser.ParseEvents(msg.details.Events, msg.details.HomeTeam, msg.details.AwayTeam)
@@ -185,11 +207,11 @@ func (m model) handleMatchDetails(msg matchDetailsMsg) (tea.Model, tea.Cmd) {
 		// Continue polling if match is live
 		if msg.details.Status == api.MatchStatusLive {
 			// For initial load, clear loading state
-			// For poll refresh, loading is cleared by 0.5s timer (pollDisplayCompleteMsg)
+			// For poll refresh, loading is cleared by 1s timer (pollDisplayCompleteMsg)
 			if !m.polling {
 				m.loading = false
 			}
-			// Note: if m.polling is true, m.loading stays true until the 0.5s timer fires
+			// Note: if m.polling is true, m.loading stays true until the 1s timer fires
 
 			m.polling = true
 			// Schedule next poll tick (90 seconds from now)
@@ -264,6 +286,8 @@ func (m model) resetToMainView() (tea.Model, tea.Cmd) {
 	m.matchDetailsCache = make(map[int]*api.MatchDetails)
 	m.liveUpdates = nil
 	m.lastEvents = nil
+	m.lastHomeScore = 0
+	m.lastAwayScore = 0
 	m.loading = false
 	m.polling = false
 	m.matches = nil
@@ -811,7 +835,7 @@ func (m model) handleMainViewCheck(msg mainViewCheckMsg) (tea.Model, tea.Cmd) {
 }
 
 // handlePollTick handles the 90-second poll tick.
-// Shows "Updating..." spinner for 0.5s as visual feedback, then fetches data.
+// Shows "Updating..." spinner for 1s as visual feedback, then fetches data.
 func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	// Only process if we're still in live view and polling is active
 	if m.currentView != viewLiveMatches || !m.polling {
@@ -826,7 +850,7 @@ func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	// Set loading state to show "Updating..." spinner
 	m.loading = true
 
-	// Start the actual API call, spinner animation, and 0.5s display timer
+	// Start the actual API call, spinner animation, and 1s display timer
 	return m, tea.Batch(
 		fetchPollMatchDetails(m.fotmobClient, msg.matchID, m.useMockData),
 		ui.SpinnerTick(),
@@ -834,9 +858,9 @@ func (m model) handlePollTick(msg pollTickMsg) (tea.Model, tea.Cmd) {
 	)
 }
 
-// handlePollDisplayComplete hides the spinner after 0.5s display time.
+// handlePollDisplayComplete hides the spinner after 1s display time.
 func (m model) handlePollDisplayComplete() (tea.Model, tea.Cmd) {
-	// Hide spinner - the 0.5s visual feedback is complete
+	// Hide spinner - the 1s visual feedback is complete
 	m.loading = false
 	return m, nil
 }
@@ -865,6 +889,55 @@ func (m model) handleFilterMatches(msg list.FilterMatchesMsg) (tea.Model, tea.Cm
 	}
 
 	return m, cmd
+}
+
+// notifyNewGoals sends desktop notifications when a goal is scored.
+// Uses score-based detection (more reliable than event ID comparison).
+// Only called during poll refreshes when we have previous score data.
+func (m *model) notifyNewGoals(details *api.MatchDetails) {
+	if m.notifier == nil || details == nil {
+		return
+	}
+
+	// Get current scores
+	homeScore := 0
+	awayScore := 0
+	if details.HomeScore != nil {
+		homeScore = *details.HomeScore
+	}
+	if details.AwayScore != nil {
+		awayScore = *details.AwayScore
+	}
+
+	// Check if score increased (goal scored)
+	homeGoalScored := homeScore > m.lastHomeScore
+	awayGoalScored := awayScore > m.lastAwayScore
+
+	if !homeGoalScored && !awayGoalScored {
+		return
+	}
+
+	// Find the most recent goal event to get player details
+	var goalEvent *api.MatchEvent
+	for i := len(details.Events) - 1; i >= 0; i-- {
+		event := details.Events[i]
+		if strings.ToLower(event.Type) == "goal" {
+			// Check if this goal matches the team that scored
+			if homeGoalScored && event.Team.ID == details.HomeTeam.ID {
+				goalEvent = &event
+				break
+			}
+			if awayGoalScored && event.Team.ID == details.AwayTeam.ID {
+				goalEvent = &event
+				break
+			}
+		}
+	}
+
+	if goalEvent != nil {
+		// Send notification - errors are silently ignored to not disrupt the app
+		_ = m.notifier.Goal(*goalEvent, details.HomeTeam, details.AwayTeam, homeScore, awayScore)
+	}
 }
 
 // max returns the larger of two integers.

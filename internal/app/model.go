@@ -4,6 +4,7 @@ package app
 import (
 	"github.com/0xjuanma/golazo/internal/api"
 	"github.com/0xjuanma/golazo/internal/fotmob"
+	"github.com/0xjuanma/golazo/internal/notify"
 	"github.com/0xjuanma/golazo/internal/ui"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -38,6 +39,8 @@ type model struct {
 	matchDetailsCache map[int]*api.MatchDetails // Cache to avoid repeated API calls
 	liveUpdates       []string
 	lastEvents        []api.MatchEvent
+	lastHomeScore     int // Track last known home score for goal notifications
+	lastAwayScore     int // Track last known away score for goal notifications
 
 	// Stats data cache - stores 5 days of data, filtered client-side for Today/3d/5d views
 	statsData *fotmob.StatsData
@@ -80,6 +83,9 @@ type model struct {
 	// API clients
 	fotmobClient *fotmob.Client
 	parser       *fotmob.LiveUpdateParser
+
+	// Notifications
+	notifier *notify.DesktopNotifier
 }
 
 // New creates a new application model with default values.
@@ -141,6 +147,7 @@ func New(useMockData bool) model {
 		useMockData:         useMockData,
 		fotmobClient:        fotmob.NewClient(),
 		parser:              fotmob.NewLiveUpdateParser(),
+		notifier:            notify.NewDesktopNotifier(),
 		spinner:             s,
 		randomSpinner:       randomSpinner,
 		statsViewSpinner:    statsViewSpinner,

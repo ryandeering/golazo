@@ -46,6 +46,12 @@ const (
 	LoadingFetching = "Fetching..."
 )
 
+// Notification text
+const (
+	// NotificationTitleGoal is the title shown in goal notifications.
+	NotificationTitleGoal = "⚽ GOLAZO!"
+)
+
 // Stats labels
 const (
 	LabelStatus = "Status: "
