@@ -1,6 +1,6 @@
 # Supported Leagues
 
-Golazo supports **30 leagues and competitions**. Customize your selection in Settings.
+Golazo supports **40 leagues and competitions**. Customize your selection in Settings.
 
 > **Missing your favourite league?** [Create an issue](https://github.com/0xjuanma/golazo/issues/new) and we'll add it!
 
@@ -9,10 +9,15 @@ Golazo supports **30 leagues and competitions**. Customize your selection in Set
 | | League |
 |---|--------|
 | 🏴󠁧󠁢󠁥󠁮󠁧󠁿 | Premier League |
+| 🏴󠁧󠁢󠁥󠁮󠁧󠁿 | Women's Super League |
 | 🇪🇸 | La Liga |
+| 🇪🇸 | Liga F |
 | 🇩🇪 | Bundesliga |
+| 🇩🇪 | Frauen-Bundesliga |
 | 🇮🇹 | Serie A |
+| 🇮🇹 | Serie A Femminile |
 | 🇫🇷 | Ligue 1 |
+| 🇫🇷 | Première Ligue Féminine |
 
 ## Europe — Other Leagues
 
@@ -33,8 +38,10 @@ Golazo supports **30 leagues and competitions**. Customize your selection in Set
 | | Competition |
 |---|-------------|
 | 🏆 | UEFA Champions League |
+| 🏆 | Women's UEFA Champions League |
 | 🏆 | UEFA Europa League |
 | 🇪🇺 | UEFA Euro |
+| 🇪🇺 | UEFA Women's Euro |
 
 ## Domestic Cups
 
@@ -42,6 +49,7 @@ Golazo supports **30 leagues and competitions**. Customize your selection in Set
 |---|-----|
 | 🏴󠁧󠁢󠁥󠁮󠁧󠁿 | FA Cup |
 | 🇩🇪 | DFB Pokal |
+| 🇩🇪 | Women's DFB Pokal |
 | 🇮🇹 | Coppa Italia |
 | 🇫🇷 | Coupe de France |
 | 🇪🇸 | Copa del Rey |
@@ -60,6 +68,7 @@ Golazo supports **30 leagues and competitions**. Customize your selection in Set
 | | League |
 |---|--------|
 | 🇺🇸 | MLS |
+| 🇺🇸 | NWSL |
 | 🇲🇽 | Liga MX |
 
 ## Middle East
@@ -73,4 +82,5 @@ Golazo supports **30 leagues and competitions**. Customize your selection in Set
 | | Competition |
 |---|-------------|
 | 🌍 | FIFA World Cup |
+| 🌍 | Women's FIFA World Cup |
 | 🌍 | Africa Cup of Nations |
