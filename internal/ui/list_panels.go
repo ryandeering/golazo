@@ -28,10 +28,16 @@ func RenderLiveMatchesListPanel(width, height int, listModel list.Model) string 
 		listView,
 	)
 
+	// Truncate inner content before applying border to preserve border rendering
+	// neonPanelStyle has 2 lines for border (top + bottom), so inner height = height - 2
+	innerHeight := height - 2
+	if innerHeight > 0 {
+		content = truncateToHeight(content, innerHeight)
+	}
+
 	panel := neonPanelStyle.
 		Width(width).
 		Height(height).
-		MaxHeight(height).
 		Render(content)
 
 	return panel
@@ -79,10 +85,16 @@ func RenderStatsListPanel(width, height int, finishedList list.Model, upcomingLi
 			"",
 			upcomingListView,
 		)
+
+		// Truncate inner content before applying border to preserve border rendering
+		innerHeight := height - 2
+		if innerHeight > 0 {
+			content = truncateToHeight(content, innerHeight)
+		}
+
 		panel := neonPanelStyle.
 			Width(width).
 			Height(height).
-			MaxHeight(height).
 			Render(content)
 		return panel
 	}
@@ -95,10 +107,15 @@ func RenderStatsListPanel(width, height int, finishedList list.Model, upcomingLi
 		finishedListView,
 	)
 
+	// Truncate inner content before applying border to preserve border rendering
+	innerHeight := height - 2
+	if innerHeight > 0 {
+		content = truncateToHeight(content, innerHeight)
+	}
+
 	panel := neonPanelStyle.
 		Width(width).
 		Height(height).
-		MaxHeight(height).
 		Render(content)
 
 	return panel
@@ -726,4 +743,20 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// truncateToHeight truncates content to fit within maxLines.
+// This is used to truncate inner content before applying bordered styles,
+// ensuring borders are always rendered completely.
+func truncateToHeight(content string, maxLines int) string {
+	if maxLines <= 0 {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	if len(lines) <= maxLines {
+		return content
+	}
+
+	return strings.Join(lines[:maxLines], "\n")
 }
