@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Center-Aligned Event Timeline** - Match events now display with centered time, home events expand left, away events expand right
+- **New Leagues** - Added Colombian division A & B leagues
 
 ### Changed
 
